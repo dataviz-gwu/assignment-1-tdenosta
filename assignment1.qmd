@@ -1,47 +1,145 @@
 ---
 title: "Assignment 1"
-author: "Your Name"
+author: "Tori Denosta"
 format: html
 ---
 
-**Overview:** *For this assignment, you are going to download some variables using the `wbstats` and `vdemdata` packages. Then you are going to wrangle these data and merge the two data sets into one and analyze how they relate to women's representation in national parliaments. Do your work for each step in the code chunks provided. Be sure to label your code chunks.* 
+**Overview:** *For this assignment, you are going to download some variables using the `wbstats` and `vdemdata` packages. Then you are going to wrangle these data and merge the two data sets into one and analyze how they relate to women's representation in national parliaments. Do your work for each step in the code chunks provided. Be sure to label your code chunks.*
 
 ## Step 1: Download data from the V-Dem Dataset
 
-*Look at the V-Dem [codebook](https://www.v-dem.net/data/reference-documents/). Identify two measures of democracy that are not the polyarchy score that we used in Module 1.2.* 
+*Look at the V-Dem [codebook](https://www.v-dem.net/data/reference-documents/). Identify two measures of democracy that are not the polyarchy score that we used in Module 1.2.*
 
-*Try to pick variables that will relate to women's representation and read the description of the variable to make sure that it includes data for a sufficient number of years, e.g. that the data will be somewhat recent. Select the most recent 20 years of data for your analysis.* 
+*Try to pick variables that will relate to women's representation and read the description of the variable to make sure that it includes data for a sufficient number of years, e.g. that the data will be somewhat recent. Select the most recent 20 years of data for your analysis.*
 
-*Make sure to load the packages that you need and `glimpse()` the data or `View()` it to make sure that it downloaded properly.* 
+*Make sure to load the packages that you need and `glimpse()` the data or `View()` it to make sure that it downloaded properly.*
 
 ```{r}
+#| label: v-dem
 
+# Load packages
+library(dplyr)
+library(vdemdata)
+
+# Download the data
+
+democracy <- vdem |>
+  filter(year >= 2002) |>
+  select(
+    country = country_name,
+    vdem_ctry_id = country_id,
+    year,
+    f_suffrage = v2fsuffrage,
+    free_clac = v2clacfree,
+    region = e_regionpol_6C
+    ) |>
+  mutate(
+    region = case_match(region,
+                        1 ~ "Eastern Europe",
+                        2 ~ "Latin America",
+                        3 ~ "Middle East",
+                        4 ~ "Africa",
+                        5 ~ "The West",
+                        6 ~ "Asia")
+  )
+
+# View the data
+glimpse(democracy)
 ```
 
 ## Step 2: Download data from the World Bank
 
-*Next, download the variable on women's represenation that we used in Module 1.2 ("SG.GEN.PARL.ZS") and at least one additional measure related to women's empowerment. Go to the [WDI](https://databank.worldbank.org/source/world-development-indicators) site the wb_search() function to identify relevant variables. Download the most recent 20 years of data for your analysis.* 
+*Next, download the variable on women's represenation that we used in Module 1.2 ("SG.GEN.PARL.ZS") and at least one additional measure related to women's empowerment. Go to the [WDI](https://databank.worldbank.org/source/world-development-indicators) site the wb_search() function to identify relevant variables. Download the most recent 20 years of data for your analysis.*
 
 *Make sure that the indicator has enough data to conduct your analysis, i.e. that it has data for most countries and years.*
 
 ```{r}
+#| label: wb
 
+#Load packages
+library(wbstats)
+library(janitor)
+
+# Store the list of indicators in an object
+indicators <- c("women_rep" = "SG.GEN.PARL.ZS", "coos" = "SE.PRM.UNER.FE.ZS")
+
+# Download the data
+
+women_emp <- wb_data(indicators, mrv = 20) |>
+  select(!iso2c) |>
+  rename(year = date) |>
+  mutate(
+    women_rep = round_to_fraction(women_rep, denominator = 100),
+    coos = round_to_fraction(coos, denominator = 100)
+  )
+
+# View the data
+glimpse(women_emp)
 ```
 
 ## Step 3: Merge the data
 
-*Now add country codes using the `countrycode` package and merge the data using `left_join()`.* 
+*Now add country codes using the `countrycode` package and merge the data using `left_join()`.*
 
 ```{r}
+#| label: country_codes_and_join
 
+# Load countrycode package
+library(countrycode)
+
+# Add country codes
+democracy <- democracy |>
+  mutate(iso3c = countrycode(
+    sourcevar = vdem_ctry_id,
+    origin = "vdem",
+    destination = "wb"
+  )) |>
+  relocate(iso3c, .after = vdem_ctry_id)
+
+# View the data
+glimpse(democracy)
+
+# Perform left join using common iso3c variable and year
+dem_women <- left_join(democracy, women_emp, by = c("iso3c", "year")) |>
+  rename(country = country.x) |>
+  select(!country.y) |>
+  relocate(region, .after = iso3c) |>
+  select(!vdem_ctry_id)
+
+# View the joined data
+glimpse(dem_women)
 ```
 
 ## Step 4: Summarize your combined data set
 
-*Use `group_by()`, `summarize()` and `arrange()` to glean insights about your data. For example, how do regions compare on mean values of women's representation and how do these values relate to the values of other variables in your data set? Which countries stand out in terms of women's representation? Etc.* 
+*Use `group_by()`, `summarize()` and `arrange()` to glean insights about your data. For example, how do regions compare on mean values of women's representation and how do these values relate to the values of other variables in your data set? Which countries stand out in terms of women's representation? Etc.*
 
+```{r}
+#| label: group_summarize_arrange
+
+# group, summarize, arrange
+dem_summary <- dem_women |>
+  group_by(region) |>
+  summarize(
+    f_suffrage = mean(f_suffrage, na.rm = T),
+    free_clac = mean(free_clac, na.rm = T),
+    coos = mean(coos, na.rm = T),
+    women_rep = mean(women_rep, na.rm = T)
+  ) |>
+  arrange(desc(women_rep))
+
+# View the data
+dem_summary
+```
+
+Regionally, the West leads the rest of the world in all categories, emphasizing the true inter relatedness of these variables. The variable with the most deviation from the rest of the data's trend is primary school aged female children out of school. Africa stands out as having nearly one quarter of their primary school aged female children out of school, compared to the West's mere 1.6 percent. 
 
 ## Step 5: Interpret your data
 
-*Write a paragraph or so relating your insights to the Norris reading about electoral reform and women's representation. Picking a handful of country cases from your data, how does your analysis relate to her arguments about the relevance of electoral systems, statutory quotas, reserved seats or voluntary quotas?* 
+*Write a paragraph or so relating your insights to the Norris reading about electoral reform and women's representation. Picking a handful of country cases from your data, how does your analysis relate to her arguments about the relevance of electoral systems, statutory quotas, reserved seats or voluntary quotas?*
+
+In Norris's *The Impact of Electoral Reform on Women's Representation*, she presents proportional representation as the best electoral system for women's representation in parliament, especially when the mean district magnitude is larger, like in the case of the Netherlands. According to the data from the World Bank and the Varieties of Democracy, the Netherlands is ranked fourteenth in women's representation globally. 
+
+Norris also delineates other factors that contribute to the impact of electoral systems on women's representation, including political culture and the level of democratic development. Insights to the political culture and democratic development of a country could be gained by analyzing variables above, such as freedom of academic and cultural expression and primary school aged female children out of school. It is evident that countries with low freedom of expression and lack of childhood education have less democratic political cultures and stunted democratic development. This correlation can especially be observed in regions like the Middle East.
+
 
